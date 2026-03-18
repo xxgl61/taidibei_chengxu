@@ -178,6 +178,10 @@ def safe_match_2d_coord(x_coords, y_coords, target_x, target_y, tolerance=None):
     :return: (匹配索引, 匹配x, 匹配y, 距离) / (None, None, None, None)
     """
     # 校验输入数组有效性
+    
+    print(f"返回x_coords: {x_coords},len={len(x_coords)}")
+    print(f"返回y_coords: {y_coords},len={len(y_coords)}")
+
     if len(x_coords) == 0 or len(y_coords) == 0 or len(x_coords) != len(y_coords):
         print("错误：x/y坐标数组为空或长度不一致！")
         return None, None, None, None
