@@ -87,7 +87,7 @@ def read_excel_list(excel):     #读取xlsx文件
     """主函数中读取Excel表格"""
     df=pd.ExcelFile(excel)
     sheet_names = df.sheet_names 
-    sheetnumbers=0    
+    sheetnumbers=0   
     print("该Excel文件所有的工作表：")
     for i,name in enumerate(sheet_names, 1):
         print(f"{i}.{name}") 
@@ -139,8 +139,6 @@ def read_excel_list(excel):     #读取xlsx文件
                         usecols=["x坐标/m", "y坐标/m"],
                         engine="openpyxl"
                         )
-                    print(df.columns)
-                    print(df.values)
                     x_codes, y_codes = extract_coords_from_df(df)
                     if x_codes is not None and y_codes is not None:
                         # 构建高程矩阵（处理NaN，不影响后续计算）
@@ -156,9 +154,19 @@ def read_excel_list(excel):     #读取xlsx文件
                         engine="openpyxl",  # .xlsx固定用，.xls用xlrd
                         header=0  
                         )
+            sheet_name=sheet_names[int(choice_sheet)-1]
+            x_codes, y_codes = extract_coords_from_df(df)
+            if x_codes is not None and y_codes is not None:
+                # 构建高程矩阵（处理NaN，不影响后续计算）
+                high_matrix = df.values.astype(np.float32)
+                all_results[sheet_name] = (x_codes, y_codes, high_matrix)
+                print(f"✅ 成功 → x坐标{len(x_codes)}个，y坐标{len(y_codes)}个")
+            else:
+                print(f"❌ 无有效数字坐标（跳过该表）")
             print(f"读取成功{sheet_names[int(choice_sheet)-1]}")
             print(df.columns)
             print(df.values)
+            
 
     return  all_results# 提前return，后续代码完全没执行
     
@@ -285,23 +293,18 @@ def main():
     eight_count_seat_csv="陕甘八县的高程数据.csv"
     Qin_zhi_dao="附件2  秦直道及周边地形和相关遗迹的数据.xlsx"
     output="result2.xlsx"
-    target_points = [
-        ("秦直道", 1292176.07, 4105424.08),
-        ("秦直道", 1315893.15, 4085747.84),
-        ("秦直道", 1319911.01, 4065228.58),
-        ("秦直道", 1334988.77, 4042973.91),
-        ("秦直道", 1345509.95, 4025746.98),
-        ("秦直道", 1373110.96, 3974301.37),
-        ("烽火台", 1307404.10, 4094344.62),
-        ("烽火台", 1359078.89, 4011143.96),
-        ("关隘", 1374526.53, 3965855.59),
-        ("关隘", 1362751.20, 3998089.80)
-        ]
+    all_results=read_excel_list(Qin_zhi_dao)
+    print(all_results)
+    target_points=all_results["秦直道"] #表2要求的5个位置
+        
     #读取数据
     x_coords,y_coords,e_matrix=read_csv_list(eight_count_seat_csv)
     print(f"{x_coords},{y_coords},{e_matrix}")
     print("caculating points ")
-    all_results=read_excel_list(Qin_zhi_dao)
+    qin_x_coords, qin_y_coords, _ = all_results["秦直道"]
+    target_points = []
+    for x, y in zip(qin_x_coords, qin_y_coords):
+        target_points.append(("秦直道", x, y))
     print(f"all_results: {all_results}")
     print("读取完成，开始计算特征...")
 
@@ -325,38 +328,14 @@ def main():
                 "局部最小高程/m": features["局部最小高程/m"],
                 "局部平均高程/m": features["局部平均高程/m"],
                 "高程极差/m": features["高程极差/m"],
-                "地表粗糙度/m": features["地表粗糙度/m"],
+                "地表粗糙度": features["地表粗糙度"],
                 "相对高程/m": features["相对高程/m"]
             }
             results.append(features)
             print(f"完成位置{idx}（{point_type}）的特征计算")
         except Exception as e:
             print(f"位置{idx}（{point_type}，({x}, {y})）计算失败：{str(e)}")
-    for x,y in all_results.values():
-        try:
-            features = calculate_features(x, y, x_coords, y_coords, e_matrix)
-            features["序号"] = idx
-            features["类型"] = point_type
-            # 调整列顺序（匹配表1格式）
-            features = {
-                "序号": features["序号"],
-                "类型": features["类型"],
-                "x坐标/m": features["x坐标/m"],
-                "y坐标/m": features["y坐标/m"],
-                "高程/m": features["高程/m"],
-                "坡度/°": features["坡度/°"],
-                "坡向/°": features["坡向/°"],
-                "局部最大高程/m": features["局部最大高程/m"],
-                "局部最小高程/m": features["局部最小高程/m"],
-                "局部平均高程/m": features["局部平均高程/m"],
-                "高程极差/m": features["高程极差/m"],
-                "地表粗糙度/m": features["地表粗糙度/m"],
-                "相对高程/m": features["相对高程/m"]
-            }
-            results.append(features)
-            print(f"完成位置{idx}（{point_type}）的特征计算")
-        except Exception as e:
-            print(f"位置{idx}（{point_type}，({x}, {y})）计算失败：{str(e)}")
+    
 
     # 3. 保存结果到Excel
     if results:
