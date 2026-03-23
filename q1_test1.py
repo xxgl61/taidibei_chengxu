@@ -3,7 +3,21 @@ import numpy as np
 import math
 from scipy.ndimage import convolve
 import os
+import glob
+import rasterio
 
+def read_tif_to_array(tif_path):
+    """读取TIF文件，返回x/y坐标数组和高程矩阵"""
+    with rasterio.open(tif_path) as src:
+        elevation_data = src.read(1)  # 读取第一波段（高程数据）
+        transform = src.transform  # 获取仿射变换参数
+        print("高程数据形状:", elevation_data.shape)
+        print("仿射变换参数:", transform)
+        # 计算每个像素的地理坐标
+        rows, cols = elevation_data.shape
+        x_coords = np.arange(cols) * transform.a + transform.c  # 计算x坐标
+        y_coords = np.arange(rows) * transform.e + transform.f  # 计算y坐标
+        return x_coords, y_coords, elevation_data
 def is_numeric_string(s):
     """辅助函数：判断字符串是否可转为数字（用于坐标校验）"""
     try:
@@ -15,10 +29,6 @@ def is_numeric_string(s):
 def extract_coords_from_df(df):
     """辅助函数：从DataFrame提取x/y坐标（列=X，索引=Y），校验数字格式"""
     """从你的Excel DataFrame中提取x/y坐标（适配第一列x坐标）"""
-    print("\n=== 当前工作表数据结构（前3行）===")
-    print(df.head(3))
-    print(f"=== 所有列名 ===")
-    print(df.columns.tolist())
 
     # 1. 定位x坐标列（优先第一列，或含“x”关键词的列）
     # 方案：先尝试第一列，若无效则模糊匹配“x坐标”列
@@ -83,6 +93,7 @@ def read_csv_list(csv_path):
     elevation_matrix = df.values.astype(np.float32)
     return x_coords, y_coords, elevation_matrix
 
+
 def read_excel_list(excel):     #读取xlsx文件
     """主函数中读取Excel表格"""
     df=pd.ExcelFile(excel)
@@ -108,10 +119,12 @@ def read_excel_list(excel):     #读取xlsx文件
             xl_file = pd.ExcelFile(excel, engine="openpyxl")
             sheet_names = xl_file.sheet_names
             print(f"\n开始读取Excel（共{len(sheet_names)}个工作表）：")
+            sheet_name_list=[]
             
             # 遍历所有工作表
             for idx, sheet_name in enumerate(sheet_names, 1):
                 print(f"\n[{idx}/{len(sheet_names)}] 处理工作表：{sheet_name}")
+                sheet_name_list.append(sheet_name)
                 # 读取当前工作表（index_col=0 与CSV格式对齐）
                 df = pd.read_excel(
                     xl_file,
@@ -176,8 +189,6 @@ def find_target_next_index(code,target):
     return np.argmin(np.abs(code-target)) #返回最近的索引
 
 def safe_match_2d_coord(x_coords, y_coords, target_x, target_y, tolerance=None):
-    print(f"返回x_coords: {x_coords},len={len(x_coords)}")
-    print(f"返回y_coords: {y_coords},len={len(y_coords)}")
 
     if len(x_coords) == 0 or len(y_coords) == 0:
         print("错误：坐标数组为空！")
@@ -286,26 +297,46 @@ def calculate_features(x, y, x_codes, y_codes, matrix):
         "地表粗糙度": std_elevation,
         "相对高程/m": r_e
     }
-
+def write_multi_sheet_excel(results_dict, output_path):
+    """
+    将不同类型的结果写入Excel的不同工作表
+    :param results_dict: 字典，格式 {工作表名: 特征结果列表}
+    :param output_path: 输出Excel路径
+    """
+    # 创建Excel写入器（支持多工作表）
+    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        for sheet_name, results in results_dict.items():
+            if results:  # 仅当有有效结果时写入
+                df = pd.DataFrame(results)
+                # 写入指定名称的工作表
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+                print(f"✅ 已将「{sheet_name}」的{len(results)}条结果写入工作表")
+            else:
+                print(f"⚠️ 「{sheet_name}」无有效结果，跳过该工作表")
+    print(f"\n所有结果已保存到：{output_path}")
 #主程序
 def main():
     """主函数 没啥要解释的"""
     eight_count_seat_csv="陕甘八县的高程数据.csv"
     Qin_zhi_dao="附件2  秦直道及周边地形和相关遗迹的数据.xlsx"
-    output="result2.xlsx"
+    tif_path="陕甘八县的高程数据.tif"
+    output="result4.xlsx"
     all_results=read_excel_list(Qin_zhi_dao)
-    print(all_results)
-    target_points=all_results["秦直道"] #表2要求的5个位置
+    results_dict = {}
+    for sheet_name in all_results.keys():
+        # 提取当前工作表的坐标
+        sheet_x, sheet_y, _ = all_results[sheet_name]
+        target_points = [(sheet_name, x, y) for x, y in zip(sheet_x, sheet_y)]
+        
+        if not target_points:
+            print(f"⚠️ 「{sheet_name}」无有效坐标，跳过计算")
+            results_dict[sheet_name] = []
+            continue
+    print(target_points)
         
     #读取数据
     x_coords,y_coords,e_matrix=read_csv_list(eight_count_seat_csv)
-    print(f"{x_coords},{y_coords},{e_matrix}")
-    print("caculating points ")
-    qin_x_coords, qin_y_coords, _ = all_results["秦直道"]
-    target_points = []
-    for x, y in zip(qin_x_coords, qin_y_coords):
-        target_points.append(("秦直道", x, y))
-    print(f"all_results: {all_results}")
+    tif_x_coords, tif_y_coords, tif_elevation_data = read_tif_to_array(tif_path)
     print("读取完成，开始计算特征...")
 
     #计算特征
@@ -338,16 +369,17 @@ def main():
     
 
     # 3. 保存结果到Excel
-    if results:
-        df_result = pd.DataFrame(results)
-        df_result.to_excel(output, index=False, engine="openpyxl")
-        print(f"\n结果已保存到：{output}")
-        
+    results_dict[sheet_name] =results
+    write_multi_sheet_excel(results_dict, output)       
         # 打印表2要求的结果（控制台输出确认）
-        print("\n表2要求的位置特征结果：")
-        print(df_result.to_string(index=False))
-    else:
-        print("无有效计算结果，未生成Excel文件")
+    print("\n===== 各工作表结果预览 =====")
+    for sheet_name, results in results_dict.items():
+        if results:
+            print(f"\n【{sheet_name}】共{len(results)}条结果：")
+            print(pd.DataFrame(results).head(3).to_string(index=False))
+        else:
+            print(f"\n【{sheet_name}】无有效结果")
+
 
 #运行主程序
 if __name__=="__main__":
